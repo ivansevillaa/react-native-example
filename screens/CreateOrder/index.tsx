@@ -1,9 +1,9 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Button, Input, Text } from '@ui-kitten/components';
 import { format } from 'date-fns';
-import React, { useContext } from 'react';
+import React, { useContext, useReducer, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
-import { View, Image, FlatList, ScrollView } from 'react-native';
+import { View, Image, ScrollView } from 'react-native';
 
 import { UserContext } from '../../context/UserContext';
 import OrderService from '../../services/OrderService';
@@ -11,9 +11,26 @@ import { OrderDataRequest } from '../../types/Order';
 import { Plate } from '../../types/Plate';
 import styles from './styles';
 
+const countReducer = (state, action) => {
+  switch (action.type) {
+    case 'UPDATE_PLATE': {
+      return {
+        ...state,
+        [action.payload.menu]: action.payload.count,
+      };
+    }
+  }
+};
+
 export default function CreateOrder() {
   const userContext = useContext(UserContext);
-  const { control, handleSubmit } = useForm<OrderDataRequest>();
+  const [state, dispatch] = useReducer(countReducer, {});
+
+  const {
+    control,
+    handleSubmit,
+    formState: { errors },
+  } = useForm<OrderDataRequest>();
   const date = new Date();
   const transformedDate = format(date, 'dd/MM/yyyy').replaceAll('/', '-');
 
@@ -35,18 +52,15 @@ export default function CreateOrder() {
   const { isLoading, mutate } = useMutation(OrderService.createOrder, {
     onSuccess: (response) => {
       if (response.data) {
-        mutatePlate([
-          {
+        const plates = [];
+        for (const idMenu in state) {
+          plates.push({
             id_pedido_mobile: response.data.toString(),
-            id_menuMobile: '0c6f8a8e-d369-46f9-90cf-98045bcf0925',
-            cantidad: 9,
-          },
-          {
-            id_pedido_mobile: response.data.toString(),
-            id_menuMobile: 'e473da03-8138-45c3-ae08-67a3e6d70ac1',
-            cantidad: 2,
-          },
-        ]);
+            id_menuMobile: idMenu,
+            cantidad: state[idMenu],
+          });
+        }
+        mutatePlate(plates);
       }
     },
   });
@@ -67,50 +81,12 @@ export default function CreateOrder() {
     });
   };
 
-  const renderItem = ({ item }: { item: Plate }) => (
-    <View style={styles.card}>
-      <View style={styles.row}>
-        <View>
-          <Text>{item.plato}</Text>
-          <Text>{item.informacion_plato}</Text>
-        </View>
-        <Image
-          source={{
-            uri: item.url_foto_menu,
-          }}
-          style={styles.image}
-        />
-      </View>
-      <View style={styles.row}>
-        <Text>${item.precio}</Text>
-        <View>
-          <Text>-</Text>
-          <Text>0</Text>
-          <Text>+</Text>
-        </View>
-      </View>
-    </View>
-  );
-
   if (loadingPlates) {
     return <Text>Cargando...</Text>;
   }
 
   return (
     <ScrollView>
-      <Text>Platos</Text>
-      {data?.data && data?.data.length > 0 ? (
-        <FlatList
-          data={data?.data}
-          renderItem={renderItem}
-          keyExtractor={(item, index) => index.toString()}
-          ItemSeparatorComponent={() => <View style={styles.separator} />}
-          style={styles.listContainer}
-          scrollEnabled={false}
-        />
-      ) : (
-        <Text>Los platos no cargaron :/</Text>
-      )}
       <Controller
         control={control}
         name="direccion"
@@ -120,6 +96,7 @@ export default function CreateOrder() {
             value={value}
             onBlur={onBlur}
             onChangeText={(value) => onChange(value)}
+            style={styles.input}
           />
         )}
         rules={{
@@ -129,9 +106,69 @@ export default function CreateOrder() {
           },
         }}
       />
+      {errors.direccion && <Text style={styles.errorMessage}>{errors.direccion.message}</Text>}
+      <View style={styles.listContainer}>
+        {data?.data && data?.data.length > 0 ? (
+          data.data?.map((item, index) => {
+            return (
+              <View>
+                <RenderItem key={index} item={item} dispatch={dispatch} />
+                {index + 1 !== data.data?.length && <View style={styles.separator} />}
+              </View>
+            );
+          })
+        ) : (
+          <Text>Los platos no cargaron :/</Text>
+        )}
+      </View>
       <Button onPress={handleSubmit(handleOrderCreation)}>
         {isLoading || platePostIsLoading ? 'Cargando...' : 'Crear pedido'}
       </Button>
     </ScrollView>
   );
 }
+
+const RenderItem = ({ item, dispatch }: { item: Plate }) => {
+  const [count, setCount] = useState(0);
+
+  const handleDecrement = () => {
+    if (count > 0) {
+      setCount(count - 1);
+      dispatch({ type: 'UPDATE_PLATE', payload: { menu: item.id_MenuMobile, count: count - 1 } });
+    }
+  };
+
+  const handleIncrement = () => {
+    setCount(count + 1);
+    dispatch({ type: 'UPDATE_PLATE', payload: { menu: item.id_MenuMobile, count: count + 1 } });
+  };
+
+  return (
+    <View>
+      <View style={styles.row}>
+        <View style={styles.info}>
+          <Text style={styles.title}>{item.plato}</Text>
+          <Text style={styles.text}>{item.informacion_plato}</Text>
+        </View>
+        <Image
+          source={{
+            uri: item.url_foto_menu,
+          }}
+          style={styles.image}
+        />
+      </View>
+      <View style={{ ...styles.row, ...styles.bottom }}>
+        <Text style={styles.title}>${item.precio}</Text>
+        <View style={{ ...styles.row, ...styles.counter }}>
+          <Text style={styles.countBtn} onPress={handleDecrement}>
+            -
+          </Text>
+          <Text style={styles.count}>{count}</Text>
+          <Text style={styles.countBtn} onPress={handleIncrement}>
+            +
+          </Text>
+        </View>
+      </View>
+    </View>
+  );
+};
